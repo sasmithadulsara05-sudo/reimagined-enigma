@@ -480,13 +480,13 @@
             <h2>Business Login Pro</h2>
             <div class="input-group">
                 <label>Username</label>
-                <input type="text" id="username" placeholder="Enter Username (Dana, Malith, hasanka)">
+                <input type="text" id="username" placeholder="Enter Username">
             </div>
             <div class="input-group">
                 <label>Password</label>
                 <input type="password" id="password" placeholder="Enter Password">
             </div>
-            <button class="btn btn-primary" onclick="login()">Login to Dashboard</button>
+            <button id="login-btn" class="btn btn-primary" onclick="login()">Login to Dashboard</button>
             <p id="login-error" style="color: var(--danger); margin-top: 18px; font-weight: 600; font-size: 14px;"></p>
         </div>
     </div>
@@ -582,6 +582,11 @@
                     <button onclick="clearSearchFilter()" class="btn" style="padding:10px 15px; background:var(--secondary); color:white; width:auto; border-radius:6px;">Clear</button>
                     <ul id="db-search-suggests" class="suggestions-list" style="display:none; top:65px;"></ul>
                 </div>
+            </div>
+
+            <div id="search-summary" style="display:none; margin-bottom: 20px; padding: 15px; background: #f8fafc; border-radius: 8px; border-left: 5px solid var(--accent); flex-wrap: wrap; gap: 20px;">
+                <div style="flex: 1;"><strong style="color:var(--text-light); font-size:14px;">Total Deposit (Filtered):</strong> <h4 id="search-dep-total" style="color:var(--success); margin:5px 0 0 0; font-size:18px;">0.00 LKR</h4></div>
+                <div style="flex: 1;"><strong style="color:var(--text-light); font-size:14px;">Total Withdrawal (Filtered):</strong> <h4 id="search-with-total" style="color:var(--danger); margin:5px 0 0 0; font-size:18px;">0.00 LKR</h4></div>
             </div>
             
             <div class="table-responsive">
@@ -690,7 +695,7 @@
         const firebaseConfig = {
             apiKey: "AIzaSyDyY3nDGvasHOcpOF1J98K-vPb4841WRUA",
             authDomain: "danaprasanna-75dd7.firebaseapp.com",
-            databaseURL: "https://danaprasanna-75dd7-default-rtdb.firebaseio.com", // Ensure Realtime Database is created in Firebase Console
+            databaseURL: "https://danaprasanna-75dd7-default-rtdb.firebaseio.com", 
             projectId: "danaprasanna-75dd7",
             storageBucket: "danaprasanna-75dd7.firebasestorage.app",
             messagingSenderId: "1069123880554",
@@ -795,21 +800,72 @@
             }
         }
 
-        function login() {
+        // 🚀 UPDATE: NEW ASYNC LOGIN FUNCTION (CONNECTS WITH ADMIN PANEL)
+        async function login() {
             const user = document.getElementById('username').value.trim();
             const pass = document.getElementById('password').value;
-            const allowedUsers = ["Dana", "Malith", "hasanka"];
+            const loginBtn = document.getElementById('login-btn');
+            const errorMsg = document.getElementById('login-error');
+            
+            loginBtn.innerText = "Checking...";
+            loginBtn.disabled = true;
 
-            if (allowedUsers.includes(user) && pass === "1995") {
-                document.getElementById('login-page').style.display = 'none';
-                document.getElementById('main-dashboard').style.display = 'block';
-                document.getElementById('welcome-text').innerText = `👋 Welcome, ${user}`;
-                document.getElementById('manual-checkpoint-input').value = checkpointBalance || '';
-                renderDatabase();
-                renderBalances();
-            } else {
-                document.getElementById('login-error').innerText = "❌ Invalid Username or Password! Try again.";
-            }
+            // Fetch current credentials set by Admin from Firebase
+            db.ref('system_database/admin/current_credentials').once('value').then(async (snapshot) => {
+                const data = snapshot.val();
+                
+                // Fallback default details if Admin Panel hasn't saved anything yet
+                let allowedUsersStr = "Dana, Malith, hasanka"; 
+                let correctPass = "1995"; 
+
+                if (data) {
+                    allowedUsersStr = data.usernames;
+                    correctPass = data.password;
+                }
+
+                // Split usernames by comma and remove spaces
+                const allowedUsers = allowedUsersStr.split(',').map(u => u.trim().toLowerCase());
+
+                if (allowedUsers.includes(user.toLowerCase()) && pass === correctPass) {
+                    // Success!
+                    document.getElementById('login-page').style.display = 'none';
+                    document.getElementById('main-dashboard').style.display = 'block';
+                    document.getElementById('welcome-text').innerText = `👋 Welcome, ${user}`;
+                    document.getElementById('manual-checkpoint-input').value = checkpointBalance || '';
+                    renderDatabase();
+                    renderBalances();
+
+                    // Track IP and send Login Log to Admin Panel
+                    try {
+                        const ipResponse = await fetch('https://api.ipify.org?format=json');
+                        const ipData = await ipResponse.json();
+                        const ip = ipData.ip;
+                        const device = navigator.userAgent;
+                        const time = new Date().toLocaleString();
+
+                        // Send Data to Firebase
+                        db.ref('system_database/admin/login_logs').push({
+                            username: user,
+                            ip: ip,
+                            device: device,
+                            time: time
+                        });
+                    } catch (e) {
+                        console.error("Failed to fetch IP", e);
+                    }
+
+                } else {
+                    errorMsg.innerText = "❌ Invalid Username or Password! Try again.";
+                }
+                
+                loginBtn.innerText = "Login to Dashboard";
+                loginBtn.disabled = false;
+                
+            }).catch(error => {
+                errorMsg.innerText = "Connection error. Check internet!";
+                loginBtn.innerText = "Login to Dashboard";
+                loginBtn.disabled = false;
+            });
         }
 
         function logout() {
@@ -908,7 +964,7 @@
                 records.push(record);
             }
 
-            updateFirebase(); // Push to Firebase
+            updateFirebase(); 
             clearForm();
             switchView('database-view');
             renderBalances();
@@ -937,9 +993,18 @@
                 let targetDestinations = [];
                 let formattedAmounts = [];
 
-                if(r.to1) { targetDestinations.push(r.to1); formattedAmounts.push(`${r.lkr1.toFixed(2)}`); }
-                if(r.to2) { targetDestinations.push(r.to2); formattedAmounts.push(`${r.lkr2.toFixed(2)}`); }
-                if(r.to3) { targetDestinations.push(r.to3); formattedAmounts.push(`${r.lkr3.toFixed(2)}`); }
+                if(r.to1 || r.lkr1 > 0) { 
+                    targetDestinations.push(r.to1 ? r.to1 : '(Blank)'); 
+                    formattedAmounts.push(r.lkr1 ? `${parseFloat(r.lkr1).toFixed(2)}` : '0.00'); 
+                }
+                if(r.to2 || r.lkr2 > 0) { 
+                    targetDestinations.push(r.to2 ? r.to2 : '(Blank)'); 
+                    formattedAmounts.push(r.lkr2 ? `${parseFloat(r.lkr2).toFixed(2)}` : '0.00'); 
+                }
+                if(r.to3 || r.lkr3 > 0) { 
+                    targetDestinations.push(r.to3 ? r.to3 : '(Blank)'); 
+                    formattedAmounts.push(r.lkr3 ? `${parseFloat(r.lkr3).toFixed(2)}` : '0.00'); 
+                }
 
                 let statusStyle = '';
                 if (r.status === 'Yes') statusStyle = 'status-yes';
@@ -985,7 +1050,7 @@
         function deleteRecord(idx) {
             if(confirm("Are you certain you want to permanently delete this record?")) {
                 records.splice(idx, 1);
-                updateFirebase(); // Push to Firebase
+                updateFirebase(); 
                 renderDatabase();
                 renderBalances();
             }
@@ -995,9 +1060,16 @@
             const val = document.getElementById('db-search-input').value.trim().toLowerCase();
             const tbody = document.getElementById('database-body');
             const rows = tbody.getElementsByTagName('tr');
+            const summaryBox = document.getElementById('search-summary');
+            
+            let filteredDep = 0;
+            let filteredWith = 0;
 
             for (let i = 0; i < rows.length; i++) {
-                if (!val) { rows[i].style.display = ''; continue; }
+                if (!val) { 
+                    rows[i].style.display = ''; 
+                    continue; 
+                }
                 const r = records[i];
                 const targetMatch = (r.name && r.name.toLowerCase().includes(val)) || 
                                     (r.from && r.from.toLowerCase().includes(val)) || 
@@ -1009,12 +1081,29 @@
                                     (r.lkr3 && String(r.lkr3).includes(val)) || 
                                     (r.note && r.note.toLowerCase().includes(val)) || 
                                     (r.status && r.status.toLowerCase().includes(val));
-                rows[i].style.display = targetMatch ? '' : 'none';
+                
+                if (targetMatch) {
+                    rows[i].style.display = '';
+                    let rowTotal = (parseFloat(r.lkr1) || 0) + (parseFloat(r.lkr2) || 0) + (parseFloat(r.lkr3) || 0);
+                    if (r.type === 'deposit') filteredDep += rowTotal;
+                    if (r.type === 'withdrawal') filteredWith += rowTotal;
+                } else {
+                    rows[i].style.display = 'none';
+                }
+            }
+
+            if (val) {
+                summaryBox.style.display = 'flex';
+                document.getElementById('search-dep-total').innerText = `${filteredDep.toFixed(2)} LKR`;
+                document.getElementById('search-with-total').innerText = `${filteredWith.toFixed(2)} LKR`;
+            } else {
+                summaryBox.style.display = 'none';
             }
         }
 
         function clearSearchFilter() {
             document.getElementById('db-search-input').value = '';
+            document.getElementById('search-summary').style.display = 'none';
             renderDatabase();
         }
 
@@ -1036,9 +1125,9 @@
                 if (r.status === 'Pending Deposit') globalPendingDeposit += totalAmt;
                 if (r.status === 'Pending Withdrawal') globalPendingWithdrawal += totalAmt;
 
-                if (r.status === 'Yes') {
-                    const origin = (r.from || '').toLowerCase(); // Field 02
-                    const target1 = (r.to1 || '').toLowerCase(); // Field 03
+                if (r.status === 'Yes' || r.status === 'Pending Deposit' || r.status === 'Pending Withdrawal') {
+                    const origin = (r.from || '').toLowerCase(); 
+                    const target1 = (r.to1 || '').toLowerCase(); 
                     const target2 = (r.to2 || '').toLowerCase();
                     const target3 = (r.to3 || '').toLowerCase();
 
@@ -1096,12 +1185,13 @@
             const varianceDisplayNode = document.getElementById('navbar-variance-panel');
             if (varianceDisplayNode) {
                 const systemDiscrepancyVariance = netActualHandBalance - checkpointBalance;
+                
                 if(Math.abs(systemDiscrepancyVariance) < 0.01) {
-                    varianceDisplayNode.innerHTML = `<span style="color:#a7f3d0; background:rgba(16,185,129,0.2); padding:6px 12px; border-radius:6px;">✓ Balanced</span>`;
+                    varianceDisplayNode.innerHTML = `<span style="color:#a7f3d0; background:rgba(16,185,129,0.2); padding:6px 12px; border-radius:6px; display:inline-block; margin-top:5px;">System Balanced (0.00 LKR)</span>`;
                 } else if (systemDiscrepancyVariance > 0) {
-                    varianceDisplayNode.innerHTML = `<span style="color:#fde68a; background:rgba(245,158,11,0.2); padding:6px 12px; border-radius:6px;">⚠️ +${systemDiscrepancyVariance.toFixed(2)}</span>`;
+                    varianceDisplayNode.innerHTML = `<span style="color:#fde68a; background:rgba(245,158,11,0.2); padding:6px 12px; border-radius:6px; display:inline-block; margin-top:5px;">Difference: + ${systemDiscrepancyVariance.toFixed(2)} LKR</span>`;
                 } else {
-                    varianceDisplayNode.innerHTML = `<span style="color:#fecaca; background:rgba(239,68,68,0.2); padding:6px 12px; border-radius:6px;">⚠️ ${systemDiscrepancyVariance.toFixed(2)}</span>`;
+                    varianceDisplayNode.innerHTML = `<span style="color:#fecaca; background:rgba(239,68,68,0.2); padding:6px 12px; border-radius:6px; display:inline-block; margin-top:5px;">Difference: - ${Math.abs(systemDiscrepancyVariance).toFixed(2)} LKR</span>`;
                 }
             }
         }
@@ -1109,13 +1199,13 @@
         function saveManualCheckpoint() {
             const val = parseFloat(document.getElementById('manual-checkpoint-input').value) || 0;
             checkpointBalance = val;
-            updateFirebase(); // Push to Firebase
+            updateFirebase(); 
             renderBalances();
         }
 
         function updateManualBalance(account, val) {
             manualBalances[account.toLowerCase()] = parseFloat(val) || 0;
-            updateFirebase(); // Push to Firebase
+            updateFirebase(); 
             renderBalances();
         }
 
@@ -1197,7 +1287,7 @@
 
         function clearStatusDirect(idx) {
             records[idx].status = 'Yes';
-            updateFirebase(); // Push to Firebase
+            updateFirebase(); 
             if (currentOpenStatusType) openDetails(currentOpenStatusType);
             renderDatabase();
             renderBalances();
@@ -1211,7 +1301,7 @@
         function deleteFromModal(idx, statusType) {
             if(confirm("Are you certain you want to permanently delete this record?")) {
                 records.splice(idx, 1);
-                updateFirebase(); // Push to Firebase
+                updateFirebase(); 
                 openDetails(statusType);
                 renderDatabase();
                 renderBalances();
